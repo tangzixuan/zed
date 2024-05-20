@@ -53,7 +53,7 @@ pub struct ProjectPanel {
     focus_handle: FocusHandle,
     visible_entries: Vec<(WorktreeId, Vec<Entry>)>,
     last_worktree_root_id: Option<ProjectEntryId>,
-    expanded_dir_ids: HashMap<WorktreeId, Vec<ProjectEntryId>>,
+    expanded_dir_ids: HashMap<WorktreeId, BTreeSet<ProjectEntryId>>,
     unfolded_dir_ids: HashSet<ProjectEntryId>,
     selection: Option<Selection>,
     context_menu: Option<(View<ContextMenu>, Point<Pixels>, Subscription)>,
@@ -287,7 +287,7 @@ impl ProjectPanel {
                 focus_handle,
                 visible_entries: Default::default(),
                 last_worktree_root_id: None,
-                expanded_dir_ids: Default::default(),
+                expanded_dir_ids: HashMap::default(),
                 unfolded_dir_ids: Default::default(),
                 selection: None,
                 edit_state: None,
@@ -583,17 +583,14 @@ impl ProjectPanel {
                         return;
                     };
 
-                match expanded_dir_ids.binary_search(&entry_id) {
-                    Ok(_) => self.select_next(&SelectNext, cx),
-                    Err(ix) => {
-                        self.project.update(cx, |project, cx| {
-                            project.expand_entry(worktree_id, entry_id, cx);
-                        });
-
-                        expanded_dir_ids.insert(ix, entry_id);
-                        self.update_visible_entries(None, cx);
-                        cx.notify();
-                    }
+                if expanded_dir_ids.insert(entry_id) {
+                    self.project.update(cx, |project, cx| {
+                        project.expand_entry(worktree_id, entry_id, cx);
+                    });
+                    self.update_visible_entries(None, cx);
+                    cx.notify()
+                } else {
+                    self.select_next(&SelectNext, cx)
                 }
             }
         }
@@ -611,22 +608,16 @@ impl ProjectPanel {
 
             loop {
                 let entry_id = entry.id;
-                match expanded_dir_ids.binary_search(&entry_id) {
-                    Ok(ix) => {
-                        expanded_dir_ids.remove(ix);
-                        self.update_visible_entries(Some((worktree_id, entry_id)), cx);
-                        cx.notify();
-                        break;
-                    }
-                    Err(_) => {
-                        if let Some(parent_entry) =
-                            entry.path.parent().and_then(|p| worktree.entry_for_path(p))
-                        {
-                            entry = parent_entry;
-                        } else {
-                            break;
-                        }
-                    }
+                if expanded_dir_ids.remove(&entry_id) {
+                    self.update_visible_entries(Some((worktree_id, entry_id)), cx);
+                    cx.notify();
+                    break;
+                } else if let Some(parent_entry) =
+                    entry.path.parent().and_then(|p| worktree.entry_for_path(p))
+                {
+                    entry = parent_entry;
+                } else {
+                    break;
                 }
             }
         }
@@ -645,14 +636,9 @@ impl ProjectPanel {
         if let Some(worktree_id) = self.project.read(cx).worktree_id_for_entry(entry_id, cx) {
             if let Some(expanded_dir_ids) = self.expanded_dir_ids.get_mut(&worktree_id) {
                 self.project.update(cx, |project, cx| {
-                    match expanded_dir_ids.binary_search(&entry_id) {
-                        Ok(ix) => {
-                            expanded_dir_ids.remove(ix);
-                        }
-                        Err(ix) => {
-                            project.expand_entry(worktree_id, entry_id, cx);
-                            expanded_dir_ids.insert(ix, entry_id);
-                        }
+                    if !expanded_dir_ids.remove(&entry_id) {
+                        project.expand_entry(worktree_id, entry_id, cx);
+                        expanded_dir_ids.insert(entry_id);
                     }
                 });
                 self.update_visible_entries(Some((worktree_id, entry_id)), cx);
@@ -842,9 +828,7 @@ impl ProjectPanel {
                 if let Some(mut entry) = worktree.entry_for_id(entry_id) {
                     loop {
                         if entry.is_dir() {
-                            if let Err(ix) = expanded_dir_ids.binary_search(&entry.id) {
-                                expanded_dir_ids.insert(ix, entry.id);
-                            }
+                            expanded_dir_ids.insert(entry.id);
                             directory_id = entry.id;
                             break;
                         } else {
@@ -1385,9 +1369,7 @@ impl ProjectPanel {
                 continue;
             };
             if entry.is_dir() {
-                if let Err(idx) = expanded_dir_ids.binary_search(&entry.id) {
-                    expanded_dir_ids.insert(idx, entry.id);
-                }
+                expanded_dir_ids.insert(entry.id);
             }
         }
 
@@ -1436,9 +1418,9 @@ impl ProjectPanel {
                     // The first time a worktree's root entry becomes available,
                     // mark that root entry as expanded.
                     if let Some(entry) = snapshot.root_entry() {
-                        e.insert(vec![entry.id]).as_slice()
+                        e.insert(BTreeSet::from([entry.id]))
                     } else {
-                        &[]
+                        e.insert(BTreeSet::new())
                     }
                 }
             };
@@ -1502,9 +1484,7 @@ impl ProjectPanel {
                         git_status: entry.git_status,
                     });
                 }
-                if expanded_dir_ids.binary_search(&entry.id).is_err()
-                    && entry_iter.advance_to_sibling()
-                {
+                if !expanded_dir_ids.contains(&entry.id) && entry_iter.advance_to_sibling() {
                     continue;
                 }
                 entry_iter.advance();
@@ -1523,6 +1503,10 @@ impl ProjectPanel {
                     }
                 })
             }
+            self.expanded_dir_ids
+                .entry(worktree_id)
+                .or_default()
+                .extend(entries_to_re_add.iter().map(|entry| entry.id));
             visible_worktree_entries.extend(entries_to_re_add);
 
             snapshot.propagate_git_statuses(&mut visible_worktree_entries);
@@ -1600,10 +1584,7 @@ impl ProjectPanel {
 
                 if let Some(mut entry) = worktree.entry_for_id(entry_id) {
                     loop {
-                        if let Err(ix) = expanded_dir_ids.binary_search(&entry.id) {
-                            expanded_dir_ids.insert(ix, entry.id);
-                        }
-
+                        expanded_dir_ids.insert(entry.id);
                         if let Some(parent_entry) =
                             entry.path.parent().and_then(|p| worktree.entry_for_path(p))
                         {
@@ -1646,16 +1627,13 @@ impl ProjectPanel {
             if let Some(worktree) = self.project.read(cx).worktree_for_id(*worktree_id, cx) {
                 let snapshot = worktree.read(cx).snapshot();
                 let root_name = OsStr::new(snapshot.root_name());
-                let expanded_entry_ids = self
-                    .expanded_dir_ids
-                    .get(&snapshot.id())
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]);
+                let expanded_entry_ids = self.expanded_dir_ids.get(&snapshot.id());
 
                 let entry_range = range.start.saturating_sub(ix)..end_ix - ix;
                 for entry in visible_worktree_entries[entry_range].iter() {
                     let status = git_status_setting.then(|| entry.git_status).flatten();
-                    let is_expanded = expanded_entry_ids.binary_search(&entry.id).is_ok();
+                    let is_expanded =
+                        expanded_entry_ids.map_or(false, |ids| ids.contains(&entry.id));
                     let icon = match entry.kind {
                         EntryKind::File(_) => {
                             if show_file_icons {
