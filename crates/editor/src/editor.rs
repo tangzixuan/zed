@@ -149,6 +149,8 @@ use workspace::{OpenInTerminal, OpenTerminal, Toast};
 
 use crate::hover_links::find_url;
 
+pub const MULTI_BUFFER_BUFFER_HEADER_HEIGHT: u8 = 2;
+pub const MULTI_BUFFER_EXCERPT_HEADER_HEIGHT: u8 = 1;
 pub const DEFAULT_MULTIBUFFER_CONTEXT: u32 = 2;
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_LINE_LEN: usize = 1024;
@@ -1620,8 +1622,8 @@ impl Editor {
                 style.font(),
                 font_size,
                 None,
-                2,
-                1,
+                MULTI_BUFFER_BUFFER_HEADER_HEIGHT,
+                MULTI_BUFFER_EXCERPT_HEADER_HEIGHT,
                 fold_placeholder,
                 cx,
             )

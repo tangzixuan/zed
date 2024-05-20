@@ -7,7 +7,7 @@ use editor::{
     actions::Cancel,
     items::entry_git_aware_label_color,
     scroll::{Autoscroll, ScrollAnchor},
-    Editor,
+    Editor, MULTI_BUFFER_BUFFER_HEADER_HEIGHT,
 };
 use file_icons::FileIcons;
 
@@ -203,6 +203,7 @@ impl ProjectPanel {
                     .upgrade()
                     .expect("have a &mut Workspace"),
                 move |project_panel, workspace, event, cx| {
+                    // TODO kb subscribe for multibuffer events, and select panel items on selection jumping to other buffer's excerpt
                     if let WorkspaceEvent::ActiveItemChanged = event {
                         let new_multi_buffer_entries =
                             active_multi_buffer_entries(workspace.read(cx), cx);
@@ -1376,6 +1377,7 @@ impl ProjectPanel {
         Some(())
     }
 
+    // TODO kb indicate new `active_multi_buffer_entries` here and only unfold parents for those
     fn update_visible_entries(
         &mut self,
         new_selected_entry: Option<(WorktreeId, ProjectEntryId)>,
@@ -1491,7 +1493,6 @@ impl ProjectPanel {
             }
 
             // TODO kb can we speed things up? Sort by path before inserting?
-            // TODO kb need to set those directories as expanded
             let mut entries_to_re_add = Vec::with_capacity(maybe_applicable_folder_entries.len());
             for visible_entry in &visible_worktree_entries {
                 maybe_applicable_folder_entries.retain(|maybe_parent_entry| {
@@ -1503,6 +1504,8 @@ impl ProjectPanel {
                     }
                 })
             }
+
+            // TODO kb this always re-adds the entries as open, even if it was toggled
             self.expanded_dir_ids
                 .entry(worktree_id)
                 .or_default()
@@ -1874,8 +1877,11 @@ impl ProjectPanel {
                                                 active_editor.update(cx, |editor, cx| {
                                                     editor.set_scroll_anchor(
                                                         ScrollAnchor {
-                                                            // TODO kb headers are not taken into account
-                                                            offset: Point::default(),
+                                                            offset: Point::new(
+                                                                0.0,
+                                                                -(MULTI_BUFFER_BUFFER_HEADER_HEIGHT
+                                                                    as f32),
+                                                            ),
                                                             anchor,
                                                         },
                                                         cx,
