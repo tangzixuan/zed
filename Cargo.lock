@@ -8578,6 +8578,8 @@ dependencies = [
  "serde_json",
  "settings",
  "smol",
+ "terminal",
+ "terminal_view",
  "theme",
  "tokio",
  "ui",
