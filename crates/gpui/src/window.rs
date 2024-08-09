@@ -1366,11 +1366,7 @@ impl<'a> WindowContext<'a> {
 
     /// The line height associated with the current text style.
     pub fn line_height(&self) -> Pixels {
-        let rem_size = self.rem_size();
-        let text_style = self.text_style();
-        text_style
-            .line_height
-            .to_pixels(text_style.font_size, rem_size)
+        self.text_style().line_height_in_pixels(self.rem_size())
     }
 
     /// Call to prevent the default action of an event. Currently only used to prevent
@@ -2601,7 +2597,9 @@ impl<'a> WindowContext<'a> {
             .insert_primitive(MonochromeSprite {
                 order: 0,
                 pad: 0,
-                bounds,
+                bounds: bounds
+                    .map_origin(|origin| origin.floor())
+                    .map_size(|size| size.ceil()),
                 content_mask,
                 color,
                 tile,
@@ -4573,6 +4571,12 @@ impl WindowId {
     /// Converts this window ID to a `u64`.
     pub fn as_u64(&self) -> u64 {
         self.0.as_ffi()
+    }
+}
+
+impl From<u64> for WindowId {
+    fn from(value: u64) -> Self {
+        WindowId(slotmap::KeyData::from_ffi(value))
     }
 }
 

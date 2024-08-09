@@ -160,9 +160,9 @@ use workspace::{OpenInTerminal, OpenTerminal, TabBarSettings, Toast};
 use crate::hover_links::find_url;
 use crate::signature_help::{SignatureHelpHiddenBy, SignatureHelpState};
 
-pub const FILE_HEADER_HEIGHT: u8 = 1;
-pub const MULTI_BUFFER_EXCERPT_HEADER_HEIGHT: u8 = 1;
-pub const MULTI_BUFFER_EXCERPT_FOOTER_HEIGHT: u8 = 1;
+pub const FILE_HEADER_HEIGHT: u32 = 1;
+pub const MULTI_BUFFER_EXCERPT_HEADER_HEIGHT: u32 = 1;
+pub const MULTI_BUFFER_EXCERPT_FOOTER_HEIGHT: u32 = 1;
 pub const DEFAULT_MULTIBUFFER_CONTEXT: u32 = 2;
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_LINE_LEN: usize = 1024;
@@ -558,7 +558,7 @@ pub struct Editor {
     tasks: BTreeMap<(BufferId, BufferRow), RunnableTasks>,
     tasks_update_task: Option<Task<()>>,
     previous_search_ranges: Option<Arc<[Range<Anchor>]>>,
-    file_header_size: u8,
+    file_header_size: u32,
     breadcrumb_header: Option<String>,
     focused_block: Option<FocusedBlock>,
 }
@@ -1539,6 +1539,7 @@ pub(crate) struct NavigationData {
 
 enum GotoDefinitionKind {
     Symbol,
+    Declaration,
     Type,
     Implementation,
 }
@@ -1884,7 +1885,6 @@ impl Editor {
                         if active {
                             blink_manager.enable(cx);
                         } else {
-                            blink_manager.show_cursor(cx);
                             blink_manager.disable(cx);
                         }
                     });
@@ -8949,6 +8949,22 @@ impl Editor {
         self.go_to_definition_of_kind(GotoDefinitionKind::Symbol, false, cx)
     }
 
+    pub fn go_to_declaration(
+        &mut self,
+        _: &GoToDeclaration,
+        cx: &mut ViewContext<Self>,
+    ) -> Task<Result<bool>> {
+        self.go_to_definition_of_kind(GotoDefinitionKind::Declaration, false, cx)
+    }
+
+    pub fn go_to_declaration_split(
+        &mut self,
+        _: &GoToDeclaration,
+        cx: &mut ViewContext<Self>,
+    ) -> Task<Result<bool>> {
+        self.go_to_definition_of_kind(GotoDefinitionKind::Declaration, true, cx)
+    }
+
     pub fn go_to_implementation(
         &mut self,
         _: &GoToImplementation,
@@ -9009,6 +9025,7 @@ impl Editor {
         let project = workspace.read(cx).project().clone();
         let definitions = project.update(cx, |project, cx| match kind {
             GotoDefinitionKind::Symbol => project.definition(&buffer, head, cx),
+            GotoDefinitionKind::Declaration => project.declaration(&buffer, head, cx),
             GotoDefinitionKind::Type => project.type_definition(&buffer, head, cx),
             GotoDefinitionKind::Implementation => project.implementation(&buffer, head, cx),
         });
@@ -9597,6 +9614,7 @@ impl Editor {
                                 }
                             }),
                             disposition: BlockDisposition::Below,
+                            priority: 0,
                         }],
                         Some(Autoscroll::fit()),
                         cx,
@@ -9806,14 +9824,11 @@ impl Editor {
                 for (block_id, diagnostic) in &active_diagnostics.blocks {
                     new_styles.insert(
                         *block_id,
-                        (
-                            None,
-                            diagnostic_block_renderer(diagnostic.clone(), None, true, is_valid),
-                        ),
+                        diagnostic_block_renderer(diagnostic.clone(), None, true, is_valid),
                     );
                 }
-                self.display_map.update(cx, |display_map, cx| {
-                    display_map.replace_blocks(new_styles, cx)
+                self.display_map.update(cx, |display_map, _cx| {
+                    display_map.replace_blocks(new_styles)
                 });
             }
         }
@@ -9856,13 +9871,14 @@ impl Editor {
                 .insert_blocks(
                     diagnostic_group.iter().map(|entry| {
                         let diagnostic = entry.diagnostic.clone();
-                        let message_height = diagnostic.message.matches('\n').count() as u8 + 1;
+                        let message_height = diagnostic.message.matches('\n').count() as u32 + 1;
                         BlockProperties {
                             style: BlockStyle::Fixed,
                             position: buffer.anchor_after(entry.range.start),
                             height: message_height,
                             render: diagnostic_block_renderer(diagnostic, None, true, true),
                             disposition: BlockDisposition::Below,
+                            priority: 0,
                         }
                     }),
                     cx,
@@ -10168,20 +10184,36 @@ impl Editor {
         if let Some(autoscroll) = autoscroll {
             self.request_autoscroll(autoscroll, cx);
         }
+        cx.notify();
         blocks
     }
 
-    pub fn replace_blocks(
+    pub fn resize_blocks(
         &mut self,
-        blocks: HashMap<CustomBlockId, (Option<u8>, RenderBlock)>,
+        heights: HashMap<CustomBlockId, u32>,
         autoscroll: Option<Autoscroll>,
         cx: &mut ViewContext<Self>,
     ) {
         self.display_map
-            .update(cx, |display_map, cx| display_map.replace_blocks(blocks, cx));
+            .update(cx, |display_map, cx| display_map.resize_blocks(heights, cx));
         if let Some(autoscroll) = autoscroll {
             self.request_autoscroll(autoscroll, cx);
         }
+        cx.notify();
+    }
+
+    pub fn replace_blocks(
+        &mut self,
+        renderers: HashMap<CustomBlockId, RenderBlock>,
+        autoscroll: Option<Autoscroll>,
+        cx: &mut ViewContext<Self>,
+    ) {
+        self.display_map
+            .update(cx, |display_map, _cx| display_map.replace_blocks(renderers));
+        if let Some(autoscroll) = autoscroll {
+            self.request_autoscroll(autoscroll, cx);
+        }
+        cx.notify();
     }
 
     pub fn remove_blocks(
@@ -10196,6 +10228,7 @@ impl Editor {
         if let Some(autoscroll) = autoscroll {
             self.request_autoscroll(autoscroll, cx);
         }
+        cx.notify();
     }
 
     pub fn row_for_block(
@@ -11756,7 +11789,7 @@ impl Editor {
         })
     }
 
-    pub fn file_header_size(&self) -> u8 {
+    pub fn file_header_size(&self) -> u32 {
         self.file_header_size
     }
 
@@ -11789,24 +11822,8 @@ impl Editor {
         editor_snapshot: &EditorSnapshot,
         cx: &mut ViewContext<Self>,
     ) -> Option<gpui::Point<Pixels>> {
-        let text_layout_details = self.text_layout_details(cx);
-        let line_height = text_layout_details
-            .editor_style
-            .text
-            .line_height_in_pixels(cx.rem_size());
         let source_point = source.to_display_point(editor_snapshot);
-        let first_visible_line = text_layout_details
-            .scroll_anchor
-            .anchor
-            .to_display_point(editor_snapshot);
-        if first_visible_line > source_point {
-            return None;
-        }
-        let source_x = editor_snapshot.x_for_display_point(source_point, &text_layout_details);
-        let source_y = line_height
-            * ((source_point.row() - first_visible_line.row()).0 as f32
-                - text_layout_details.scroll_anchor.offset.y);
-        Some(gpui::Point::new(source_x, source_y))
+        self.display_to_pixel_point(source_point, editor_snapshot, cx)
     }
 
     pub fn display_to_pixel_point(
@@ -11817,15 +11834,16 @@ impl Editor {
     ) -> Option<gpui::Point<Pixels>> {
         let line_height = self.style()?.text.line_height_in_pixels(cx.rem_size());
         let text_layout_details = self.text_layout_details(cx);
-        let first_visible_line = text_layout_details
+        let scroll_top = text_layout_details
             .scroll_anchor
-            .anchor
-            .to_display_point(editor_snapshot);
-        if first_visible_line > source {
+            .scroll_position(editor_snapshot)
+            .y;
+
+        if source.row().as_f32() < scroll_top.floor() {
             return None;
         }
         let source_x = editor_snapshot.x_for_display_point(source, &text_layout_details);
-        let source_y = line_height * (source.row() - first_visible_line.row()).0 as f32;
+        let source_y = line_height * (source.row().as_f32() - scroll_top);
         Some(gpui::Point::new(source_x, source_y))
     }
 
