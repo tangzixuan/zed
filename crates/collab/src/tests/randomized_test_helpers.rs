@@ -220,6 +220,7 @@ impl<T: RandomizedTest> TestPlan<T> {
                 .db
                 .create_user(
                     &format!("{username}@example.com"),
+                    None,
                     false,
                     NewUserParams {
                         github_login: username.clone(),
@@ -462,7 +463,6 @@ impl<T: RandomizedTest> TestPlan<T> {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn apply_server_operation(
         plan: Arc<Mutex<Self>>,
         deterministic: BackgroundExecutor,

@@ -12,6 +12,7 @@ mod default_colors;
 mod fallback_themes;
 mod font_family_cache;
 mod icon_theme;
+mod icon_theme_schema;
 mod registry;
 mod scale;
 mod schema;
@@ -21,12 +22,14 @@ mod styles;
 use std::path::Path;
 use std::sync::Arc;
 
-use ::settings::{Settings, SettingsStore};
+use ::settings::Settings;
+use ::settings::SettingsStore;
 use anyhow::Result;
+use fallback_themes::apply_status_color_defaults;
 use fs::Fs;
 use gpui::{
-    px, AppContext, AssetSource, HighlightStyle, Hsla, Pixels, Refineable, SharedString,
-    WindowAppearance, WindowBackgroundAppearance,
+    px, App, AssetSource, HighlightStyle, Hsla, Pixels, Refineable, SharedString, WindowAppearance,
+    WindowBackgroundAppearance,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -34,6 +37,7 @@ use uuid::Uuid;
 pub use crate::default_colors::*;
 pub use crate::font_family_cache::*;
 pub use crate::icon_theme::*;
+pub use crate::icon_theme_schema::*;
 pub use crate::registry::*;
 pub use crate::scale::*;
 pub use crate::schema::*;
@@ -85,7 +89,7 @@ pub enum LoadThemes {
 }
 
 /// Initialize the theme system.
-pub fn init(themes_to_load: LoadThemes, cx: &mut AppContext) {
+pub fn init(themes_to_load: LoadThemes, cx: &mut App) {
     let (assets, load_user_themes) = match themes_to_load {
         LoadThemes::JustBase => (Box::new(()) as Box<dyn AssetSource>, false),
         LoadThemes::All(assets) => (assets, true),
@@ -116,7 +120,7 @@ pub trait ActiveTheme {
     fn theme(&self) -> &Arc<Theme>;
 }
 
-impl ActiveTheme for AppContext {
+impl ActiveTheme for App {
     fn theme(&self) -> &Arc<Theme> {
         &ThemeSettings::get_global(self).active_theme
     }
@@ -163,7 +167,9 @@ impl ThemeFamily {
             AppearanceContent::Light => StatusColors::light(),
             AppearanceContent::Dark => StatusColors::dark(),
         };
-        refined_status_colors.refine(&theme.style.status_colors_refinement());
+        let mut status_colors_refinement = theme.style.status_colors_refinement();
+        apply_status_color_defaults(&mut status_colors_refinement);
+        refined_status_colors.refine(&status_colors_refinement);
 
         let mut refined_player_colors = match theme.appearance {
             AppearanceContent::Light => PlayerColors::light(),
@@ -363,4 +369,15 @@ pub async fn read_user_theme(theme_path: &Path, fs: Arc<dyn Fs>) -> Result<Theme
     }
 
     Ok(theme_family)
+}
+
+/// Asynchronously reads the icon theme from the specified path.
+pub async fn read_icon_theme(
+    icon_theme_path: &Path,
+    fs: Arc<dyn Fs>,
+) -> Result<IconThemeFamilyContent> {
+    let reader = fs.open_sync(icon_theme_path).await?;
+    let icon_theme_family: IconThemeFamilyContent = serde_json_lenient::from_reader(reader)?;
+
+    Ok(icon_theme_family)
 }

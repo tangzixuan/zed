@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context as _};
 
 use crate::platform::blade::{BladeContext, BladeRenderer, BladeSurfaceConfig};
 use crate::{
@@ -353,7 +353,6 @@ where
 }
 
 impl X11WindowState {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         handle: AnyWindowHandle,
         client: X11ClientStatePtr,
@@ -590,7 +589,6 @@ impl X11WindowState {
                 BladeRenderer::new(gpu_context, &raw_window, config)?
             };
 
-            check_reply(|| "X11 MapWindow failed.", xcb.map_window(x_window))?;
             let display = Rc::new(X11Display::new(xcb, scale_factor, x_screen_index)?);
 
             Ok(Self {
@@ -713,7 +711,6 @@ enum WmHintPropertyState {
 }
 
 impl X11Window {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         handle: AnyWindowHandle,
         client: X11ClientStatePtr,
@@ -1276,6 +1273,14 @@ impl PlatformWindow for X11Window {
             ),
         )
         .unwrap();
+    }
+
+    fn map_window(&mut self) -> anyhow::Result<()> {
+        check_reply(
+            || "X11 MapWindow failed.",
+            self.0.xcb.map_window(self.0.x_window),
+        )?;
+        Ok(())
     }
 
     fn set_edited(&mut self, _edited: bool) {

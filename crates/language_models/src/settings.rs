@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use gpui::AppContext;
+use gpui::App;
 use language_model::LanguageModelCacheConfiguration;
 use project::Fs;
 use schemars::JsonSchema;
@@ -13,14 +13,16 @@ use crate::provider::{
     anthropic::AnthropicSettings,
     cloud::{self, ZedDotDevSettings},
     copilot_chat::CopilotChatSettings,
+    deepseek::DeepSeekSettings,
     google::GoogleSettings,
     lmstudio::LmStudioSettings,
+    mistral::MistralSettings,
     ollama::OllamaSettings,
     open_ai::OpenAiSettings,
 };
 
 /// Initializes the language model settings.
-pub fn init(fs: Arc<dyn Fs>, cx: &mut AppContext) {
+pub fn init(fs: Arc<dyn Fs>, cx: &mut App) {
     AllLanguageModelSettings::register(cx);
 
     if AllLanguageModelSettings::get_global(cx)
@@ -61,6 +63,8 @@ pub struct AllLanguageModelSettings {
     pub google: GoogleSettings,
     pub copilot_chat: CopilotChatSettings,
     pub lmstudio: LmStudioSettings,
+    pub deepseek: DeepSeekSettings,
+    pub mistral: MistralSettings,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -72,7 +76,9 @@ pub struct AllLanguageModelSettingsContent {
     #[serde(rename = "zed.dev")]
     pub zed_dot_dev: Option<ZedDotDevSettingsContent>,
     pub google: Option<GoogleSettingsContent>,
+    pub deepseek: Option<DeepseekSettingsContent>,
     pub copilot_chat: Option<CopilotChatSettingsContent>,
+    pub mistral: Option<MistralSettingsContent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -162,6 +168,18 @@ pub struct LmStudioSettingsContent {
     pub available_models: Option<Vec<provider::lmstudio::AvailableModel>>,
 }
 
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct DeepseekSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::deepseek::AvailableModel>>,
+}
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct MistralSettingsContent {
+    pub api_url: Option<String>,
+    pub available_models: Option<Vec<provider::mistral::AvailableModel>>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(untagged)]
 pub enum OpenAiSettingsContent {
@@ -246,7 +264,7 @@ impl settings::Settings for AllLanguageModelSettings {
 
     type FileContent = AllLanguageModelSettingsContent;
 
-    fn load(sources: SettingsSources<Self::FileContent>, _: &mut AppContext) -> Result<Self> {
+    fn load(sources: SettingsSources<Self::FileContent>, _: &mut App) -> Result<Self> {
         fn merge<T>(target: &mut T, value: Option<T>) {
             if let Some(value) = value {
                 *target = value;
@@ -299,6 +317,18 @@ impl settings::Settings for AllLanguageModelSettings {
                 lmstudio.as_ref().and_then(|s| s.available_models.clone()),
             );
 
+            // DeepSeek
+            let deepseek = value.deepseek.clone();
+
+            merge(
+                &mut settings.deepseek.api_url,
+                value.deepseek.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.deepseek.available_models,
+                deepseek.as_ref().and_then(|s| s.available_models.clone()),
+            );
+
             // OpenAI
             let (openai, upgraded) = match value.openai.clone().map(|s| s.upgrade()) {
                 Some((content, upgraded)) => (Some(content), upgraded),
@@ -334,6 +364,17 @@ impl settings::Settings for AllLanguageModelSettings {
                     .google
                     .as_ref()
                     .and_then(|s| s.available_models.clone()),
+            );
+
+            // Mistral
+            let mistral = value.mistral.clone();
+            merge(
+                &mut settings.mistral.api_url,
+                mistral.as_ref().and_then(|s| s.api_url.clone()),
+            );
+            merge(
+                &mut settings.mistral.available_models,
+                mistral.as_ref().and_then(|s| s.available_models.clone()),
             );
         }
 
