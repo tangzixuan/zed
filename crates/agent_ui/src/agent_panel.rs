@@ -2538,7 +2538,7 @@ impl AgentPanel {
                     }
                 },
             )
-            .anchor(Corner::TopLeft)
+            .anchor(Corner::TopRight)
             .with_handle(self.new_thread_menu_handle.clone())
             .menu({
                 let workspace = self.workspace.clone();
@@ -3518,6 +3518,7 @@ impl AgentPanel {
         let error_message = match plan {
             Plan::ZedPro => "Upgrade to usage-based billing for more prompts.",
             Plan::ZedProTrial | Plan::ZedFree => "Upgrade to Zed Pro for more prompts.",
+            Plan::ZedProV2 | Plan::ZedProTrialV2 => "",
         };
 
         Callout::new()
